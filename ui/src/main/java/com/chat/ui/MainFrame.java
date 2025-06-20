@@ -162,9 +162,11 @@ public class MainFrame extends JFrame {
         try {
             netMgr.setNickname(nickname);
             netMgr.start();
+            gwMgr.start();
+            statusBar.setGateway(true);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this,
-                    "Network start failed:\n" + ex.getMessage(),
+                    "Network/Gateway start failed:\n" + ex.getMessage(),
                     "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
@@ -197,6 +199,8 @@ public class MainFrame extends JFrame {
         } catch (Exception ignored) { }
 
         netMgr.stop();
+        gwMgr.stop();
+        statusBar.setGateway(false);
 
         miConnect.setEnabled(true);
         miDisconnect.setEnabled(false);
