@@ -4,8 +4,9 @@ package com.chat.common;
 public enum FrameType {
     HELLO((byte)1),
     MESSAGE((byte)2),
-    BYE((byte)3),
-    PART((byte)4);
+    PRIVATE((byte)3),
+    BYE((byte)4),
+    PART((byte)5);
 
     private final byte code;
     FrameType(byte code) { this.code = code; }

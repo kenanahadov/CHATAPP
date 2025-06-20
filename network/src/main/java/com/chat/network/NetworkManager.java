@@ -52,6 +52,14 @@ public class NetworkManager {
 
     public void setNickname(String nick) { myNick = nick == null ? "" : nick; }
 
+    public PublicKey getPeerKey(String nick) {
+        return peers.get(nick);
+    }
+
+    public java.util.Set<String> getPeerNames() {
+        return java.util.Set.copyOf(peers.keySet());
+    }
+
 
     public void sendFrame(Frame f, byte[] body) throws Exception {
         fragmenter.sendAll(f, body, this);
@@ -140,7 +148,7 @@ public class NetworkManager {
                 UIEventBus.publish(peers.keySet());
             }
 
-            case MESSAGE -> {
+            case MESSAGE, PRIVATE -> {
                 int sep = -1;
                 for (int i = 0; i < body.length; i++)
                     if (body[i] == 0) { sep = i; break; }
@@ -156,8 +164,14 @@ public class NetworkManager {
                 if (buf.remaining() < slen) return;
                 byte[] sig = new byte[slen];
                 buf.get(sig);
-                byte[] msgBytes = new byte[buf.remaining()];
-                buf.get(msgBytes);
+
+                byte[] encBytes = new byte[buf.remaining()];
+                buf.get(encBytes);
+
+                byte[] msgBytes;
+                try {
+                    msgBytes = CryptoUtils.decrypt(encBytes, KeyManager.loadPrivateKey());
+                } catch (Exception ignored) { return; }
 
                 if (pk != null) {
                     try {
@@ -168,7 +182,10 @@ public class NetworkManager {
                 String msg = new String(msgBytes, StandardCharsets.UTF_8);
                 if (nick.equals(myNick)) return;
 
-                UIEventBus.publish(new Object[] { nick, msg });
+                if (frame.getType() == FrameType.PRIVATE)
+                    UIEventBus.publish(new Object[] { nick, msg, Boolean.TRUE });
+                else
+                    UIEventBus.publish(new Object[] { nick, msg });
             }
 
             default -> { /* ignore */ }
