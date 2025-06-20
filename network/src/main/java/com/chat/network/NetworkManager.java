@@ -7,8 +7,15 @@ import com.chat.gateway.GatewayManager;
 
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.security.PublicKey;
+import java.security.KeyFactory;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.Base64;
 import java.util.Arrays;
 import java.util.concurrent.*;
+import com.chat.security.KeyManager;
+import com.chat.security.CryptoUtils;
+import java.nio.ByteBuffer;
 
 
 public class NetworkManager {
@@ -23,7 +30,7 @@ public class NetworkManager {
 
     private GatewayManager gwMgr;
 
-    private final ConcurrentMap<String, Boolean> peers = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, PublicKey> peers = new ConcurrentHashMap<>();
     private volatile String myNick = "";
 
     public void setGatewayManager(GatewayManager mgr) { this.gwMgr = mgr; }
@@ -89,14 +96,40 @@ public class NetworkManager {
     private void handleFrame(Frame frame, byte[] body) {
         switch (frame.getType()) {
             case HELLO -> {
-                String nick = new String(body, StandardCharsets.UTF_8);
-                boolean isNew = peers.putIfAbsent(nick, Boolean.TRUE) == null;
+                int sep = -1;
+                for (int i = 0; i < body.length; i++)
+                    if (body[i] == 0) { sep = i; break; }
+
+                String nick;
+                PublicKey key = null;
+                if (sep < 0) {
+                    nick = new String(body, StandardCharsets.UTF_8);
+                } else {
+                    nick = new String(body, 0, sep, StandardCharsets.UTF_8);
+                    try {
+                        String b64 = new String(body, sep + 1,
+                                body.length - sep - 1,
+                                StandardCharsets.UTF_8);
+                        byte[] kb = Base64.getDecoder().decode(b64);
+                        key = KeyFactory.getInstance("RSA")
+                                .generatePublic(new X509EncodedKeySpec(kb));
+                    } catch (Exception ignored) {}
+                }
+
+                boolean isNew = peers.putIfAbsent(nick, key) == null;
                 UIEventBus.publish(peers.keySet());
                 if (isNew && !myNick.equals(nick) && !myNick.isBlank()) {
                     try {
                         Frame resp = new Frame(FrameType.HELLO,
-                                               ConfigLoader.getInt("chat.ttl"));
-                        sendFrame(resp, myNick.getBytes(StandardCharsets.UTF_8));
+                                ConfigLoader.getInt("chat.ttl"));
+                        PublicKey myKey = KeyManager.loadPublicKey();
+                        byte[] nk = myNick.getBytes(StandardCharsets.UTF_8);
+                        byte[] pk = Base64.getEncoder().encode(myKey.getEncoded());
+                        byte[] payload = new byte[nk.length + 1 + pk.length];
+                        System.arraycopy(nk, 0, payload, 0, nk.length);
+                        payload[nk.length] = 0;
+                        System.arraycopy(pk, 0, payload, nk.length + 1, pk.length);
+                        sendFrame(resp, payload);
                     } catch (Exception ignored) {}
                 }
             }
@@ -114,10 +147,25 @@ public class NetworkManager {
                 if (sep < 1) return;
 
                 String nick = new String(body, 0, sep, StandardCharsets.UTF_8);
-                String msg  = new String(body, sep + 1,
-                                         body.length - sep - 1,
-                                         StandardCharsets.UTF_8);
+                PublicKey pk = peers.get(nick);
 
+                ByteBuffer buf = ByteBuffer.wrap(body, sep + 1,
+                        body.length - sep - 1);
+                if (buf.remaining() < 2) return;
+                int slen = buf.getShort() & 0xffff;
+                if (buf.remaining() < slen) return;
+                byte[] sig = new byte[slen];
+                buf.get(sig);
+                byte[] msgBytes = new byte[buf.remaining()];
+                buf.get(msgBytes);
+
+                if (pk != null) {
+                    try {
+                        if (!CryptoUtils.verify(msgBytes, sig, pk)) return;
+                    } catch (Exception ignored) { return; }
+                }
+
+                String msg = new String(msgBytes, StandardCharsets.UTF_8);
                 if (nick.equals(myNick)) return;
 
                 UIEventBus.publish(new Object[] { nick, msg });
