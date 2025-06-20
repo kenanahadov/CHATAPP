@@ -3,6 +3,7 @@ package com.chat.network;
 import com.chat.common.*;
 import com.chat.network.fragment.Fragmenter;
 import com.chat.network.fragment.Reassembler;
+import com.chat.gateway.GatewayManager;
 
 import java.net.*;
 import java.nio.charset.StandardCharsets;
@@ -20,8 +21,12 @@ public class NetworkManager {
     private final ScheduledExecutorService exec =
             Executors.newSingleThreadScheduledExecutor();
 
+    private GatewayManager gwMgr;
+
     private final ConcurrentMap<String, Boolean> peers = new ConcurrentHashMap<>();
     private volatile String myNick = "";
+
+    public void setGatewayManager(GatewayManager mgr) { this.gwMgr = mgr; }
 
 
     public void start() {
@@ -57,15 +62,31 @@ public class NetworkManager {
     }
 
 
-    public void handleIncoming(byte[] data, int len) {
+    public void processIncoming(byte[] data, int len, boolean fromGateway) {
         byte[] assembled = reassembler.process(Arrays.copyOf(data, len));
         if (assembled == null) return;
 
         Frame frame = Frame.fromBytes(Arrays.copyOf(assembled, Frame.HEADER_SIZE));
         if (!deduper.isNew(frame) || !frame.decrementTtl()) return;
 
-        byte[] body = Arrays.copyOfRange(assembled, Frame.HEADER_SIZE, assembled.length);
+        byte[] hdr = frame.toBytes();
+        System.arraycopy(hdr, 0, assembled, 0, Frame.HEADER_SIZE);
 
+        try {
+            if (fromGateway) {
+                sendRawBytes(assembled);
+            } else if (gwMgr != null) {
+                gwMgr.broadcastLocal(assembled);
+            }
+        } catch (Exception ignored) { }
+
+        byte[] body = Arrays.copyOfRange(assembled, Frame.HEADER_SIZE, assembled.length);
+        handleFrame(frame, body);
+    }
+
+    public void processIncoming(byte[] data, int len) { processIncoming(data, len, false); }
+
+    private void handleFrame(Frame frame, byte[] body) {
         switch (frame.getType()) {
             case HELLO -> {
                 String nick = new String(body, StandardCharsets.UTF_8);

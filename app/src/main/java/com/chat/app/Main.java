@@ -11,6 +11,8 @@ public class Main {
         SwingUtilities.invokeLater(() -> {
             NetworkManager netMgr = new NetworkManager();
             GatewayManager  gwMgr  = new GatewayManager();
+            netMgr.setGatewayManager(gwMgr);
+            gwMgr.setNetworkManager(netMgr);
             MainFrame       ui     = new MainFrame(netMgr, gwMgr);
             ui.setVisible(true);
         });

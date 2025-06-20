@@ -36,7 +36,7 @@ class PacketListener implements Runnable {
             while (running) {
                 DatagramPacket pkt = new DatagramPacket(buf, buf.length);
                 sock.receive(pkt);
-                mgr.handleIncoming(pkt.getData(), pkt.getLength());
+                mgr.processIncoming(pkt.getData(), pkt.getLength());
             }
 
         } catch (SocketException se) {

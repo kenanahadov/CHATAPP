@@ -162,6 +162,7 @@ public class MainFrame extends JFrame {
         try {
             netMgr.setNickname(nickname);
             netMgr.start();
+            gwMgr.start();
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this,
                     "Network start failed:\n" + ex.getMessage(),
@@ -197,6 +198,7 @@ public class MainFrame extends JFrame {
         } catch (Exception ignored) { }
 
         netMgr.stop();
+        gwMgr.stop();
 
         miConnect.setEnabled(true);
         miDisconnect.setEnabled(false);
