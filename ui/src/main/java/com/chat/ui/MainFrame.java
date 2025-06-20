@@ -8,14 +8,17 @@ import com.chat.gateway.GatewayManager;
 import com.chat.network.NetworkManager;
 import com.chat.security.KeyManager;
 import com.chat.security.SecurityException;
+import com.chat.security.CryptoUtils;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionListener;
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Base64;
 
 
 public class MainFrame extends JFrame {
@@ -90,12 +93,16 @@ public class MainFrame extends JFrame {
             String msgTxt = inputField.getText().trim();
             if (msgTxt.isEmpty()) return;
 
-            byte[] payload = (nickname + '\0' + msgTxt)
-                    .getBytes(StandardCharsets.UTF_8);
-
             try {
-                Frame f = new Frame(FrameType.MESSAGE,
+                byte[] msgBytes = msgTxt.getBytes(StandardCharsets.UTF_8);
+                byte[] sig = CryptoUtils.sign(msgBytes, KeyManager.loadPrivateKey());
+                byte[] nickBytes = nickname.getBytes(StandardCharsets.UTF_8);
+                byte[] payload = ByteBuffer.allocate(nickBytes.length + 1 + 2 + sig.length + msgBytes.length)
+                        .put(nickBytes).put((byte)0)
+                        .putShort((short)sig.length).put(sig)
+                        .put(msgBytes).array();
 
+                Frame f = new Frame(FrameType.MESSAGE,
                                     ConfigLoader.getInt("chat.ttl"));
                 netMgr.sendFrame(f, payload);
             } catch (Exception ex) {
@@ -174,8 +181,14 @@ public class MainFrame extends JFrame {
         try {
             Frame hello = new Frame(FrameType.HELLO,
                                     ConfigLoader.getInt("chat.ttl"));
-            netMgr.sendFrame(hello,
-                    nickname.getBytes(StandardCharsets.UTF_8));
+            byte[] nk = nickname.getBytes(StandardCharsets.UTF_8);
+            byte[] pk = Base64.getEncoder()
+                    .encode(KeyManager.loadPublicKey().getEncoded());
+            byte[] payload = new byte[nk.length + 1 + pk.length];
+            System.arraycopy(nk, 0, payload, 0, nk.length);
+            payload[nk.length] = 0;
+            System.arraycopy(pk, 0, payload, nk.length + 1, pk.length);
+            netMgr.sendFrame(hello, payload);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this,
                     "HELLO send failed:\n" + ex.getMessage(),
