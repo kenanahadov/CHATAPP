@@ -1,0 +1,3 @@
+
+# List other gateways you want to connect to, one per line:
+# 192.168.1.2:6000
