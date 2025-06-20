@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Base64;
+import java.security.PublicKey;
 
 
 public class MainFrame extends JFrame {
@@ -35,6 +36,7 @@ public class MainFrame extends JFrame {
     private final StatusBar     statusBar  = new StatusBar();
     private final JTextField    inputField = new JTextField();
     private final JButton       sendButton = new JButton("Send");
+    private final JComboBox<String> peerCombo = new JComboBox<>();
 
     private enum Mode { CLIENT, GATEWAY, BOTH }
     private Mode mode = Mode.BOTH;
@@ -90,6 +92,8 @@ public class MainFrame extends JFrame {
         bottom.add(statusBar, BorderLayout.SOUTH);
 
         JPanel input = new JPanel(new BorderLayout());
+        peerCombo.addItem("All");
+        input.add(peerCombo, BorderLayout.WEST);
         input.add(inputField, BorderLayout.CENTER);
         input.add(sendButton,  BorderLayout.EAST);
         bottom.add(input, BorderLayout.NORTH);
@@ -97,23 +101,44 @@ public class MainFrame extends JFrame {
 
         inputField.setEnabled(false);
         sendButton .setEnabled(false);
+        peerCombo.setEnabled(false);
 
         ActionListener sendAct = e -> {
             String msgTxt = inputField.getText().trim();
             if (msgTxt.isEmpty()) return;
 
+            String target = (String) peerCombo.getSelectedItem();
+            if (target == null) target = "All";
+
             try {
                 byte[] msgBytes = msgTxt.getBytes(StandardCharsets.UTF_8);
                 byte[] sig = CryptoUtils.sign(msgBytes, KeyManager.loadPrivateKey());
                 byte[] nickBytes = nickname.getBytes(StandardCharsets.UTF_8);
-                byte[] payload = ByteBuffer.allocate(nickBytes.length + 1 + 2 + sig.length + msgBytes.length)
-                        .put(nickBytes).put((byte)0)
-                        .putShort((short)sig.length).put(sig)
-                        .put(msgBytes).array();
 
-                Frame f = new Frame(FrameType.MESSAGE,
-                                    ConfigLoader.getInt("chat.ttl"));
-                netMgr.sendFrame(f, payload);
+                if ("All".equals(target)) {
+                    for (String peer : netMgr.getPeerNames()) {
+                        if (peer.equals(nickname)) continue;
+                        PublicKey pk = netMgr.getPeerKey(peer);
+                        if (pk == null) continue;
+                        byte[] enc = CryptoUtils.encrypt(msgBytes, pk);
+                        byte[] payload = ByteBuffer.allocate(nickBytes.length + 1 + 2 + sig.length + enc.length)
+                                .put(nickBytes).put((byte)0)
+                                .putShort((short)sig.length).put(sig)
+                                .put(enc).array();
+                        Frame f = new Frame(FrameType.MESSAGE, ConfigLoader.getInt("chat.ttl"));
+                        netMgr.sendFrame(f, payload);
+                    }
+                } else {
+                    PublicKey pk = netMgr.getPeerKey(target);
+                    if (pk == null) throw new Exception("Unknown peer public key");
+                    byte[] enc = CryptoUtils.encrypt(msgBytes, pk);
+                    byte[] payload = ByteBuffer.allocate(nickBytes.length + 1 + 2 + sig.length + enc.length)
+                            .put(nickBytes).put((byte)0)
+                            .putShort((short)sig.length).put(sig)
+                            .put(enc).array();
+                    Frame f = new Frame(FrameType.PRIVATE, ConfigLoader.getInt("chat.ttl"));
+                    netMgr.sendFrame(f, payload);
+                }
             } catch (Exception ex) {
                 JOptionPane.showMessageDialog(this,
                         "Send failed:\n" + ex.getMessage(),
@@ -121,24 +146,30 @@ public class MainFrame extends JFrame {
                 return;
             }
 
-            //local
-            chatPane.append(nickname + ": " + msgTxt);
+            //local display
+            String prefix = "All".equals(target) ? "" : " (to " + target + ")";
+            chatPane.append(nickname + prefix + ": " + msgTxt);
             inputField.setText("");
         };
         sendButton.addActionListener(sendAct);
         inputField.addActionListener(sendAct);
 
         UIEventBus.subscribe(evt -> {
-            if (evt instanceof Object[] arr && arr.length == 2) {          // MESSAGE
+            if (evt instanceof Object[] arr && arr.length >= 2) {          // MESSAGE
                 String nick = (String) arr[0];
                 String txt  = (String) arr[1];
-                chatPane.append(nick + ": " + txt);
+                boolean priv = arr.length == 3 && Boolean.TRUE.equals(arr[2]);
+                String suffix = priv ? " (private)" : "";
+                chatPane.append(nick + suffix + ": " + txt);
             } else if (evt instanceof Collection<?> coll) {                // PEER LIST
                 List<String> names = new ArrayList<>();
                 coll.forEach(o -> names.add(o.toString()));
                 SwingUtilities.invokeLater(() -> {
                     peerList.setPeers(names);
                     statusBar.setPeerCount(names.size());
+                    peerCombo.removeAllItems();
+                    peerCombo.addItem("All");
+                    for (String n : names) peerCombo.addItem(n);
                 });
             }
         });
@@ -225,6 +256,7 @@ public class MainFrame extends JFrame {
         miDisconnect.setEnabled(true);
         inputField.setEnabled(mode != Mode.GATEWAY);
         sendButton .setEnabled(mode != Mode.GATEWAY);
+        peerCombo.setEnabled(mode != Mode.GATEWAY);
         statusBar.setMode(mode == Mode.BOTH ? "CLIENT+GW" :
                 (mode == Mode.CLIENT ? "CLIENT" : "GATEWAY"));
     }
@@ -247,6 +279,7 @@ public class MainFrame extends JFrame {
         miDisconnect.setEnabled(false);
         inputField.setEnabled(false);
         sendButton .setEnabled(false);
+        peerCombo.setEnabled(false);
         statusBar.setMode("DISCONNECTED");
         peerList.setPeers(List.of());
         statusBar.setPeerCount(0);
