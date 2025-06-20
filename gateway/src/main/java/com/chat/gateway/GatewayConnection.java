@@ -1,7 +1,7 @@
 package com.chat.gateway;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -10,7 +10,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 
 public class GatewayConnection implements Runnable {
-    private static final Logger log = LoggerFactory.getLogger(GatewayConnection.class);
+    private static final Logger log = Logger.getLogger(GatewayConnection.class.getName());
 
     private final Socket sock;
     private final GatewayManager mgr;
@@ -36,7 +36,7 @@ public class GatewayConnection implements Runnable {
             out.write(data);
             out.flush();
         } catch (IOException e) {
-            log.error("Failed to send to {}: {}", addr(), e.getMessage());
+            log.log(Level.SEVERE, "Failed to send to " + addr() + ": " + e.getMessage());
             mgr.removeConnection(addr());
         }
     }
@@ -51,7 +51,7 @@ public class GatewayConnection implements Runnable {
                 mgr.onGatewayFrame(buf, this);
             }
         } catch (IOException e) {
-            log.warn("Connection closed: {}", addr());
+            log.log(Level.INFO, "Connection closed: " + addr());
         } finally {
             mgr.removeConnection(addr());
         }

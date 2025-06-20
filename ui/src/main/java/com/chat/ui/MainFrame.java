@@ -36,10 +36,14 @@ public class MainFrame extends JFrame {
     private final JTextField    inputField = new JTextField();
     private final JButton       sendButton = new JButton("Send");
 
+    private enum Mode { CLIENT, GATEWAY, BOTH }
+    private Mode mode = Mode.BOTH;
+
     private final JMenuItem miGenKeys;
     private final JMenuItem miConnect;
     private final JMenuItem miDisconnect;
     private final JMenuItem miExit;
+    private final JMenuItem miAbout;
 
 
     public MainFrame(NetworkManager netMgr, GatewayManager gwMgr) {
@@ -49,10 +53,12 @@ public class MainFrame extends JFrame {
 
         JMenuBar bar = new JMenuBar();
         JMenu file = new JMenu("File");
+        JMenu help = new JMenu("Help");
         miGenKeys    = new JMenuItem("Generate Keys");
         miConnect    = new JMenuItem("Connect");
         miDisconnect = new JMenuItem("Disconnect");
         miExit       = new JMenuItem("Exit");
+        miAbout      = new JMenuItem("About");
 
 
         file.add(miGenKeys);
@@ -62,6 +68,8 @@ public class MainFrame extends JFrame {
         file.addSeparator();
         file.add(miExit);
         bar.add(file);
+        help.add(miAbout);
+        bar.add(help);
         setJMenuBar(bar);
 
         miDisconnect.setEnabled(false);
@@ -69,6 +77,7 @@ public class MainFrame extends JFrame {
         miConnect   .addActionListener(e -> doConnect());
         miDisconnect.addActionListener(e -> doDisconnect());
         miExit      .addActionListener(e -> System.exit(0));
+        miAbout     .addActionListener(e -> showAbout());
 
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setSize(800, 600);
@@ -156,6 +165,17 @@ public class MainFrame extends JFrame {
                                                JOptionPane.PLAIN_MESSAGE);
         if (nickname == null || nickname.isBlank()) return;
 
+        String[] options = {"Client+Gateway", "Client Only", "Gateway Only"};
+        String sel = (String) JOptionPane.showInputDialog(this,
+                "Select mode:", "Connect",
+                JOptionPane.PLAIN_MESSAGE, null, options, options[0]);
+        if (sel == null) return;
+        mode = switch (sel) {
+            case "Client Only"  -> Mode.CLIENT;
+            case "Gateway Only" -> Mode.GATEWAY;
+            default             -> Mode.BOTH;
+        };
+
         // make sure keys exist
         try { KeyManager.loadPrivateKey(); KeyManager.loadPublicKey(); }
         catch (SecurityException ex) {
@@ -167,9 +187,13 @@ public class MainFrame extends JFrame {
 
         //start
         try {
-            netMgr.setNickname(nickname);
-            netMgr.start();
-            gwMgr.start();
+            if (mode != Mode.GATEWAY) {
+                netMgr.setNickname(nickname);
+                netMgr.start();
+            }
+            if (mode != Mode.CLIENT) {
+                gwMgr.start();
+            }
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this,
                     "Network start failed:\n" + ex.getMessage(),
@@ -178,40 +202,46 @@ public class MainFrame extends JFrame {
         }
 
         //HELLO
-        try {
-            Frame hello = new Frame(FrameType.HELLO,
-                                    ConfigLoader.getInt("chat.ttl"));
-            byte[] nk = nickname.getBytes(StandardCharsets.UTF_8);
-            byte[] pk = Base64.getEncoder()
-                    .encode(KeyManager.loadPublicKey().getEncoded());
-            byte[] payload = new byte[nk.length + 1 + pk.length];
-            System.arraycopy(nk, 0, payload, 0, nk.length);
-            payload[nk.length] = 0;
-            System.arraycopy(pk, 0, payload, nk.length + 1, pk.length);
-            netMgr.sendFrame(hello, payload);
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this,
-                    "HELLO send failed:\n" + ex.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
+        if (mode != Mode.GATEWAY) {
+            try {
+                Frame hello = new Frame(FrameType.HELLO,
+                                        ConfigLoader.getInt("chat.ttl"));
+                byte[] nk = nickname.getBytes(StandardCharsets.UTF_8);
+                byte[] pk = Base64.getEncoder()
+                        .encode(KeyManager.loadPublicKey().getEncoded());
+                byte[] payload = new byte[nk.length + 1 + pk.length];
+                System.arraycopy(nk, 0, payload, 0, nk.length);
+                payload[nk.length] = 0;
+                System.arraycopy(pk, 0, payload, nk.length + 1, pk.length);
+                netMgr.sendFrame(hello, payload);
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(this,
+                        "HELLO send failed:\n" + ex.getMessage(),
+                        "Error", JOptionPane.ERROR_MESSAGE);
+            }
         }
 
         miConnect.setEnabled(false);
         miDisconnect.setEnabled(true);
-        inputField.setEnabled(true);
-        sendButton .setEnabled(true);
-        statusBar.setMode("CLIENT");
+        inputField.setEnabled(mode != Mode.GATEWAY);
+        sendButton .setEnabled(mode != Mode.GATEWAY);
+        statusBar.setMode(mode == Mode.BOTH ? "CLIENT+GW" :
+                (mode == Mode.CLIENT ? "CLIENT" : "GATEWAY"));
     }
 
     private void doDisconnect() {
-        try {
-            Frame bye = new Frame(FrameType.BYE,
-                                  ConfigLoader.getInt("chat.ttl"));
-            netMgr.sendFrame(bye,
-                    nickname.getBytes(StandardCharsets.UTF_8));
-        } catch (Exception ignored) { }
-
-        netMgr.stop();
-        gwMgr.stop();
+        if (mode != Mode.GATEWAY) {
+            try {
+                Frame bye = new Frame(FrameType.BYE,
+                                      ConfigLoader.getInt("chat.ttl"));
+                netMgr.sendFrame(bye,
+                        nickname.getBytes(StandardCharsets.UTF_8));
+            } catch (Exception ignored) { }
+            netMgr.stop();
+        }
+        if (mode != Mode.CLIENT) {
+            gwMgr.stop();
+        }
 
         miConnect.setEnabled(true);
         miDisconnect.setEnabled(false);
@@ -220,5 +250,12 @@ public class MainFrame extends JFrame {
         statusBar.setMode("DISCONNECTED");
         peerList.setPeers(List.of());
         statusBar.setPeerCount(0);
+        mode = Mode.BOTH;
+    }
+
+    private void showAbout() {
+        JOptionPane.showMessageDialog(this,
+                "ChatApp\nDeveloped by XYZ University",
+                "About", JOptionPane.INFORMATION_MESSAGE);
     }
 }
