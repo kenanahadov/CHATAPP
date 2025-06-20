@@ -1,7 +1,9 @@
 package com.chat.gateway;
 
 import com.chat.common.ConfigLoader;
+import com.chat.common.Frame;
 import com.chat.network.Deduper;
+import com.chat.network.NetworkManager;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -10,6 +12,7 @@ import java.io.InputStreamReader;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -21,6 +24,9 @@ public class GatewayManager {
     private final int port = ConfigLoader.getInt("gateway.port");
     private final Deduper deduper = new Deduper();
     private GatewayServer server;
+    private NetworkManager netMgr;
+
+    public void setNetworkManager(NetworkManager nm){ this.netMgr = nm; }
 
     public void start() throws IOException {
         // 1) inbound server
@@ -86,8 +92,16 @@ public class GatewayManager {
         routingTable.remove(addr);
     }
 
- 
+
     public void onGatewayFrame(byte[] raw, GatewayConnection src) {
-        FrameForwarder.forward(raw, routingTable.all(), src);
+        if (deduper.isNew(Frame.fromBytes(Arrays.copyOf(raw, Frame.HEADER_SIZE)))) {
+            FrameForwarder.forward(raw, routingTable.all(), src);
+            if (netMgr != null) netMgr.handleFromGateway(raw, raw.length);
+        }
+    }
+
+    public void broadcastLocal(byte[] raw){
+        if (deduper.isNew(Frame.fromBytes(Arrays.copyOf(raw, Frame.HEADER_SIZE))))
+            FrameForwarder.forward(raw, routingTable.all(), null);
     }
 }
